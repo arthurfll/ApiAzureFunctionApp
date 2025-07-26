@@ -6,6 +6,7 @@ using System.Text.Json;
 using ApiAzureFunctionApp.Models;
 using ApiAzureFunctionApp.Services;
 using System.ComponentModel.DataAnnotations;
+using Azure.Storage.Queues;
 namespace ApiAzureFunctionApp.Functions;
 
 public class RegistroFunction
@@ -20,27 +21,36 @@ public class RegistroFunction
         _s = s;
     }
 
+
 [Function("RegistroFunction")]
-public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequest req)
+public async Task<IActionResult> Run(
+    [HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequest req)
 {
-    _logger.LogInformation("C# HTTP trigger function processed a request.");
+    _logger.LogInformation("Recebendo aluno via HTTP.");
 
-    Aluno? obj = await JsonSerializer.DeserializeAsync<Aluno>(req.Body);
+    var aluno = await JsonSerializer.DeserializeAsync<AlunoQueueMessage>(req.Body);
 
-    if (obj == null)
+    if (aluno == null)
         return new BadRequestObjectResult("Aluno nulo");
 
-    // Valida DataAnnotations
-    var context = new ValidationContext(obj);
+    var context = new ValidationContext(aluno);
     var results = new List<ValidationResult>();
-    if (!Validator.TryValidateObject(obj, context, results, true))
+    if (!Validator.TryValidateObject(aluno, context, results, true))
     {
         var erros = results.Select(r => r.ErrorMessage).ToList();
         return new BadRequestObjectResult(erros);
     }
 
-    await _s.CadastrarAluno(obj);
+    var connectionString = Environment.GetEnvironmentVariable("AzureWebJobsStorage");
+    var queueClient = new QueueClient(connectionString, "queue");
+    await queueClient.CreateIfNotExistsAsync();
 
-    return new OkObjectResult(obj);
+    var json = JsonSerializer.Serialize(aluno);
+    await queueClient.SendMessageAsync(json);
+
+
+    return new OkObjectResult("Aluno enfileirado com sucesso.");
 }
 }
+
+
